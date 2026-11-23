@@ -1,1 +1,64 @@
-.github/workflows/windows-build.yml
+
+name: PS5X Windows Build
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "*.zip"
+      - ".github/workflows/**"
+
+jobs:
+  windows-build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find and extract PS5X ZIP
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path . -Filter "*.zip" -File | Select-Object -First 1
+          if (-not $zip) {
+            throw "No project ZIP found in repository."
+          }
+          Expand-Archive -Path $zip.FullName -DestinationPath "$PWD\source" -Force
+
+      - name: Locate CMake project
+        shell: pwsh
+        run: |
+          $cmake = Get-ChildItem -Path source -Filter CMakeLists.txt -Recurse -File | Select-Object -First 1
+          if (-not $cmake) {
+            throw "CMakeLists.txt not found in extracted project."
+          }
+          "PROJECT_DIR=$($cmake.Directory.FullName)" >> $env:GITHUB_ENV
+
+      - name: Configure
+        run: cmake -S source -B build -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Collect files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path package | Out-Null
+          Get-ChildItem build -Filter "*.exe" -Recurse -File |
+            Copy-Item -Destination package -Force
+          Get-ChildItem build -Filter "*.dll" -Recurse -File |
+            Copy-Item -Destination package -Force
+          if (-not (Get-ChildItem package -Filter "*.exe" -File)) {
+            throw "No Windows executables were produced."
+          }
+
+      - name: Package
+        shell: pwsh
+        run: Compress-Archive -Path package\* -DestinationPath PS5X-Windows.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PS5X-Windows
+          path: PS5X-Windows.zip
+
